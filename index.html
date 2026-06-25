@@ -1,0 +1,986 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+generar_dashboard.py  — v4.10
+Orden de secciones:
+  s1 Resumen PMG
+  s2 Resumen CDC
+  s3 CDC por Equipo
+  s4 Resumen MIT
+  s5 MIT por Equipo
+  s6 Resumen FH
+  s7 Resumen Programas
+
+Fix v4.8 conservado:
+  Gasto: Tabla por Sistema/Indicador → Avance/Meta | Tabla indicadores → Meta/Avance
+"""
+
+import os, sys, json, base64, webbrowser
+from pathlib import Path
+from datetime import datetime
+import pandas as pd
+
+EXCEL_PATH  = "Datos_reporte_2026_vf.xlsx"
+OUTPUT_PATH = "dashboard_generado.html"
+LOGO_PATH   = "logo.png"
+
+REQUIRED_COLUMNS = [
+    "Periodo", "Id","Title","Año","Mes","Nombre Indicador",
+    "Instrumento de gestión","Centro de responsabilidad","Equipo",
+    "UbicacionId","Ubicación","UniversoMovil","Meta anual",
+    "Meta periodo","Ponderacion","Ponderacion MIT",
+    "Numerador","Denominador","Avance efectivo","Cumplimiento",
+    "Contrib Meta Pond","Contrib Cumpl Pond",
+    "Contrib Meta Pond MIT","Contrib Cumpl Pond MIT",
+    "Analisis_Causa","Centro de responsabilidad",
+]
+
+MONTH_ORDER = {
+    "Enero":1,"Febrero":2,"Marzo":3,"Abril":4,"Mayo":5,"Junio":6,
+    "Julio":7,"Agosto":8,"Septiembre":9,"Octubre":10,"Noviembre":11,"Diciembre":12,
+}
+
+def read_excel(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Archivo Excel no encontrado: {path}")
+    print(f"  ✓ Leyendo: {path}")
+    return pd.read_excel(path, engine="openpyxl")
+
+def validate_columns(df):
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError("Columnas faltantes:\n  - " + "\n  - ".join(missing))
+    print(f"  ✓ Columnas validadas ({len(df.columns)} encontradas).")
+
+def clean_and_transform(df):
+    df = df.copy()
+    for col in ["Meta anual","Meta periodo","Ponderacion","Ponderacion MIT",
+                "Numerador","Denominador","Avance efectivo","Cumplimiento",
+                "Contrib Meta Pond","Contrib Cumpl Pond",
+                "Contrib Meta Pond MIT","Contrib Cumpl Pond MIT"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    for col in ["Mes","Nombre Indicador","Instrumento de gestión","Equipo",
+                "Ubicación","Title","Centro de responsabilidad","Analisis_Causa"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str).str.strip()
+    df["MesOrden"] = df["Mes"].map(MONTH_ORDER).fillna(99).astype(int)
+    df = df.sort_values(["MesOrden","Equipo","Nombre Indicador"]).reset_index(drop=True)
+    print(f"  ✓ Datos transformados: {len(df)} filas.")
+    return df
+
+def encode_logo(path):
+    if os.path.exists(path):
+        ext = Path(path).suffix.lower().lstrip(".").replace("jpg","jpeg")
+        with open(path,"rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        print(f"  ✓ Logo cargado: {path}")
+        return f"data:image/{ext};base64,{b64}"
+    print("  ⚠ Logo no encontrado. Usando SVG por defecto.")
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="180" height="50">'
+           '<rect width="180" height="50" rx="8" fill="#0d6efd"/>'
+           '<text x="90" y="32" font-size="18" text-anchor="middle" '
+           'fill="white" font-family="Arial" font-weight="bold">INSTITUCIÓN</text></svg>')
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+def generate_html(df, logo_uri, output_path):
+    records      = df.where(pd.notnull(df), None).to_dict(orient="records")
+    data_json    = json.dumps(records, ensure_ascii=False, default=str)
+    generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(build_html(logo_uri, generated_at, data_json))
+    print(f"  ✓ HTML generado: {output_path} ({os.path.getsize(output_path)//1024} KB)")
+
+def build_html(logo_uri, generated_at, data_json):
+    return """<!DOCTYPE html>
+<html lang="es" data-bs-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel de Gestión Institucional 2026</title>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+<link href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+<style>
+:root{--bg:#f0f2f5;--bg-card:#fff;--sb-bg:#172033;--sb-txt:#cbd5e1;--txt:#1f2937;--txt-s:#6b7280;--border:#dee2e6;--acc:#0d6efd;--r:14px;}
+[data-bs-theme="dark"]{--bg:#0f172a;--bg-card:#1e293b;--sb-bg:#020617;--txt:#e2e8f0;--txt-s:#94a3b8;--border:#334155;}
+*,*::before,*::after{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--txt);font-family:"Segoe UI",system-ui,sans-serif;margin:0;}
+.topbar{background:linear-gradient(135deg,#1e3a8a,#0d6efd);color:#fff;padding:12px 24px;position:sticky;top:0;z-index:1100;box-shadow:0 2px 8px rgba(0,0,0,.25);}
+.topbar img{height:48px;max-width:160px;object-fit:contain;}
+.topbar h1{font-size:1.1rem;font-weight:700;margin:0;}
+.layout{display:flex;min-height:calc(100vh - 74px);}
+.sidebar{width:230px;flex-shrink:0;background:var(--sb-bg);padding:20px 0;position:sticky;top:74px;height:calc(100vh - 74px);overflow-y:auto;}
+.sidebar a{display:flex;align-items:center;gap:10px;color:var(--sb-txt);text-decoration:none;padding:10px 20px;font-size:.87rem;border-left:3px solid transparent;transition:all .18s;}
+.sidebar a:hover,.sidebar a.active{background:rgba(255,255,255,.07);color:#fff;border-left-color:#60a5fa;}
+.content{flex:1;padding:26px;overflow:hidden;}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);box-shadow:0 2px 10px rgba(0,0,0,.06);}
+.card-body{padding:20px;}
+.kpi-card{padding:18px 14px;text-align:center;}
+.kpi-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--txt-s);margin-bottom:8px;}
+.kpi-value{font-size:2rem;font-weight:800;line-height:1;}
+.filter-box{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);padding:14px 18px;margin-bottom:12px;}
+.nota-panel{background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--r);padding:10px 16px;margin-bottom:18px;font-size:.82rem;color:#1e40af;display:flex;align-items:center;gap:8px;}
+[data-bs-theme="dark"] .nota-panel{background:#1e3a5f;border-color:#3b82f6;color:#93c5fd;}
+.sec-title{font-size:1.2rem;font-weight:700;border-left:4px solid var(--acc);padding-left:12px;margin-bottom:4px;}
+.sec-sub{color:var(--txt-s);font-size:.82rem;margin-bottom:16px;padding-left:16px;}
+.prog-wrap{display:flex;align-items:center;gap:7px;min-width:140px;}
+.prog-outer{flex:1;height:10px;border-radius:999px;background:#e9ecef;overflow:hidden;}
+[data-bs-theme="dark"] .prog-outer{background:#334155;}
+.prog-inner{height:100%;border-radius:999px;transition:width .4s ease;}
+.prog-lbl{font-size:.8rem;font-weight:700;min-width:62px;text-align:right;}
+.section-anchor{scroll-margin-top:90px;}
+[data-bs-theme="dark"] table.dataTable tbody tr{background:var(--bg-card);color:var(--txt);}
+[data-bs-theme="dark"] .dataTables_wrapper .dataTables_filter input,
+[data-bs-theme="dark"] .dataTables_wrapper .dataTables_length select{background:#0f172a;color:var(--txt);border-color:var(--border);}
+[data-bs-theme="dark"] .dataTables_wrapper .dataTables_info,
+[data-bs-theme="dark"] .dataTables_wrapper .dataTables_paginate .paginate_button{color:var(--txt)!important;}
+@media(max-width:991px){
+  .layout{flex-direction:column;}
+  .sidebar{width:100%;height:auto;position:relative;top:0;display:flex;flex-wrap:wrap;padding:6px 0;}
+  .sidebar a{border-left:none;flex:1 1 45%;}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar d-flex align-items-center justify-content-between flex-wrap gap-2">
+  <div class="d-flex align-items-center gap-3">
+    <img src=\"""" + logo_uri + """\" alt="Logo">
+    <div>
+      <h1>Panel de Gestión Institucional 2026</h1>
+      <small style="opacity:.8;font-size:.76rem;"><i class="fa-regular fa-clock me-1"></i>Actualizado: """ + generated_at + """</small>
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-outline-light btn-sm" id="btnDark"><i class="fa-solid fa-moon me-1"></i><span id="darkLbl">Modo oscuro</span></button>
+    <button class="btn btn-light btn-sm fw-semibold" id="btnPDF" style="color:#dc3545;"><i class="fa-solid fa-file-pdf me-1"></i>Exportar PDF</button>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <a href="#s1" class="active"><i class="fa-solid fa-sliders fa-fw"></i>Resumen PMG</a>
+    <a href="#s2"><i class="fa-solid fa-chart-bar fa-fw"></i>Resumen CDC</a>
+    <a href="#s3"><i class="fa-solid fa-users fa-fw"></i>CDC por Equipo</a>
+    <a href="#s4"><i class="fa-solid fa-star fa-fw"></i>Resumen MIT</a>
+    <a href="#s5"><i class="fa-solid fa-user-check fa-fw"></i>MIT por Equipo</a>
+    <a href="#s6"><i class="fa-solid fa-file-alt fa-fw"></i>Resumen FH</a>
+    <a href="#s7"><i class="fa-solid fa-layer-group fa-fw"></i>Resumen Programas</a>
+  </nav>
+
+  <main class="content">
+
+    <div class="nota-panel">
+      <i class="fa-solid fa-circle-info fa-fw"></i>
+      <span>Todos los cumplimientos se calculan en base a lo programado por cada equipo para el periodo seleccionado.</span>
+    </div>
+
+    <!-- ══════════════ S1: RESUMEN PMG ══════════════ -->
+    <section id="s1" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-sliders me-2 text-primary"></i>Resumen PMG</div>
+      <div class="sec-sub">Programa de Mejoramiento de la Gestión</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s1-mes" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold mb-1">Sistema / Indicador</label>
+          <select id="s1-sis" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-md-4"><div class="card kpi-card"><div class="kpi-label">Avance efectivo</div><div class="kpi-value" id="kpi-av">—</div></div></div>
+        <div class="col-md-4"><div class="card kpi-card"><div class="kpi-label">Meta período</div><div class="kpi-value" id="kpi-mt">—</div></div></div>
+        <div class="col-md-4"><div class="card kpi-card"><div class="kpi-label">Cumplimiento</div><div class="kpi-value" id="kpi-cu">—</div></div></div>
+      </div>
+      <div class="card mb-4"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tabla por Sistema / Indicador</h6>
+        <div class="table-responsive">
+          <table id="t-pmg-sis" class="table table-sm table-bordered w-100">
+            <thead class="table-dark"><tr>
+              <th>Sistema / Indicador</th><th>Avance efectivo</th><th>Meta período</th><th>Cumplimiento</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tabla de indicadores</h6>
+        <div class="table-responsive">
+          <table id="t-pmg" class="table table-sm table-bordered w-100">
+            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ══════════════ S2: RESUMEN CDC ══════════════ -->
+    <section id="s2" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-chart-bar me-2 text-primary"></i>Resumen CDC</div>
+      <div class="sec-sub">Convenio de Desempeño Colectivo</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s2-mes" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="row g-4">
+        <div class="col-12"><div class="card"><div class="card-body">
+          <h6 class="fw-bold mb-3"><i class="fa-solid fa-map-pin text-danger me-2"></i>Ranking Equipos SEREMI</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle" id="t-seremi">
+              <thead class="table-primary"><tr><th>Equipo</th><th>Avance efectivo</th><th>Meta período</th><th>Cumplimiento</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div></div></div>
+        <div class="col-12"><div class="card"><div class="card-body">
+          <h6 class="fw-bold mb-3"><i class="fa-solid fa-building text-primary me-2"></i>Ranking Equipos Nivel Central</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle" id="t-central">
+              <thead class="table-primary"><tr><th>Equipo</th><th>Avance efectivo</th><th>Meta período</th><th>Cumplimiento</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div></div></div>
+      </div>
+    </section>
+
+    <!-- ══════════════ S3: CDC POR EQUIPO ══════════════ -->
+    <section id="s3" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-users me-2 text-primary"></i>CDC por Equipo</div>
+      <div class="sec-sub">Tendencia mensual e indicadores detallados</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s3-mes" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold mb-1">Equipo</label>
+          <select id="s3-equipo" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="card mb-4"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tendencia mensual</h6>
+        <canvas id="ch-tend" style="max-height:360px;"></canvas>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tabla de indicadores</h6>
+        <div class="table-responsive">
+          <table id="t-cdc2" class="table table-sm table-bordered w-100">
+            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ══════════════ S4: RESUMEN MIT ══════════════ -->
+    <section id="s4" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-star me-2 text-primary"></i>Resumen MIT</div>
+      <div class="sec-sub">Matriz de Indicadores Transversales — Equipos SEREMI</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s4-mes" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="col-12"><div class="card"><div class="card-body">
+        <h6 class="fw-bold mb-3"><i class="fa-solid fa-map-pin text-danger me-2"></i>Ranking Equipos SEREMI</h6>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle" id="t-mit-seremi">
+            <thead class="table-primary"><tr><th>Equipo</th><th>Avance efectivo</th><th>Meta período</th><th>Cumplimiento</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div></div>
+    </section>
+
+    <!-- ══════════════ S5: MIT POR EQUIPO ══════════════ -->
+    <section id="s5" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-user-check me-2 text-primary"></i>MIT por Equipo</div>
+      <div class="sec-sub">Matriz de Indicadores Transversales — Detalle por Equipo SEREMI</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s5-mes" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold mb-1">Equipo SEREMI</label>
+          <select id="s5-equipo" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="card mb-4"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tendencia mensual</h6>
+        <canvas id="ch-mit-tend" style="max-height:360px;"></canvas>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tabla de indicadores</h6>
+        <div class="table-responsive">
+          <table id="t-mit2" class="table table-sm table-bordered w-100">
+            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ══════════════ S6: RESUMEN FH ══════════════ -->
+    <section id="s6" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-file-alt me-2 text-primary"></i>Resumen FH</div>
+      <div class="sec-sub">Formulario H</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s6-mes" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold mb-1">Equipo</label>
+          <select id="s6-equipo" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-md-4"><div class="card kpi-card"><div class="kpi-label">Avance efectivo</div><div class="kpi-value" id="fh-kpi-av">—</div></div></div>
+        <div class="col-md-4"><div class="card kpi-card"><div class="kpi-label">Meta período</div><div class="kpi-value" id="fh-kpi-mt">—</div></div></div>
+        <div class="col-md-4"><div class="card kpi-card"><div class="kpi-label">Cumplimiento</div><div class="kpi-value" id="fh-kpi-cu">—</div></div></div>
+      </div>
+      <div class="card"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tabla de indicadores</h6>
+        <div class="table-responsive">
+          <table id="t-fh" class="table table-sm table-bordered w-100">
+            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ══════════════ S7: RESUMEN PROGRAMAS ══════════════ -->
+    <section id="s7" class="section-anchor mb-5">
+      <div class="sec-title"><i class="fa-solid fa-layer-group me-2 text-primary"></i>Resumen Programas</div>
+      <div class="sec-sub">Programas institucionales seleccionados</div>
+      <div class="filter-box row g-3 align-items-end">
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Mes</label>
+          <select id="s7-mes" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold mb-1">Programa</label>
+          <select id="s7-prog" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold mb-1">Equipo</label>
+          <select id="s7-equipo" class="form-select form-select-sm"></select>
+        </div>
+      </div>
+      <div class="card mb-4"><div class="card-body">
+        <h6 class="fw-bold mb-3">Ranking de programas</h6>
+        <canvas id="ch-prog" style="max-height:360px;"></canvas>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <h6 class="fw-bold mb-3">Tabla por componente</h6>
+        <div class="table-responsive">
+          <table id="t-prog" class="table table-sm table-bordered w-100">
+            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Modal PDF -->
+<div class="modal fade" id="m-pdf" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title"><i class="fa-solid fa-file-pdf me-2 text-danger"></i>Exportar PDF</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <p class="text-muted small mb-2">Seleccione secciones a incluir:</p>
+      <div class="form-check mb-2"><input class="form-check-input pdf-chk" type="checkbox" value="s1" id="c1" checked><label class="form-check-label" for="c1">Resumen PMG</label></div>
+      <div class="form-check mb-2"><input class="form-check-input pdf-chk" type="checkbox" value="s2" id="c2" checked><label class="form-check-label" for="c2">Resumen CDC</label></div>
+      <div class="form-check mb-2"><input class="form-check-input pdf-chk" type="checkbox" value="s3" id="c3" checked><label class="form-check-label" for="c3">CDC por Equipo</label></div>
+      <div class="form-check mb-2"><input class="form-check-input pdf-chk" type="checkbox" value="s4" id="c4" checked><label class="form-check-label" for="c4">Resumen MIT</label></div>
+      <div class="form-check mb-2"><input class="form-check-input pdf-chk" type="checkbox" value="s5" id="c5" checked><label class="form-check-label" for="c5">MIT por Equipo</label></div>
+      <div class="form-check mb-2"><input class="form-check-input pdf-chk" type="checkbox" value="s6" id="c6" checked><label class="form-check-label" for="c6">Resumen FH</label></div>
+      <div class="form-check"><input class="form-check-input pdf-chk" type="checkbox" value="s7" id="c7" checked><label class="form-check-label" for="c7">Resumen Programas</label></div>
+      <hr>
+      <p class="text-muted small mb-0"><i class="fa-solid fa-circle-info me-1"></i>Incluye filtros activos y fecha/hora.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+      <button class="btn btn-danger btn-sm" id="btn-pdf"><i class="fa-solid fa-download me-1"></i>Descargar PDF</button>
+    </div>
+  </div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script>
+"use strict";
+Chart.register(ChartDataLabels);
+
+const ALL = """ + data_json + """;
+
+const MO = {Enero:1,Febrero:2,Marzo:3,Abril:4,Mayo:5,Junio:6,
+            Julio:7,Agosto:8,Septiembre:9,Octubre:10,Noviembre:11,Diciembre:12};
+
+const PROG_OK = new Set([
+  "Programa Plan de Gestión Territorial Regional","Programa Rutas Patrimoniales",
+  "Programa Energía","Programa Gestión y Normalización","Programa Indígena"
+]);
+
+const PMG_MAP = {
+  "CSyEU":[
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 1  Calidad de los Servicios y Experiencia Usuaria en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 2  Calidad de los Servicios y Experiencia Usuaria en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 2 Objetivo 1  Calidad de los Servicios y Experiencia Usuaria en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 3 Objetivo 1  Calidad de los Servicios y Experiencia Usuaria en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 4 Objetivo 1  Calidad de los Servicios y Experiencia Usuaria en el año t"
+  ],
+  "Estado Verde":[
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 1 de Estado Verde en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 2 de Estado Verde en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 2 Objetivo 1 Estado Verde en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 3 Objetivo 1 Estado Verde en el año t"
+  ],
+  "Riesgos Psicosociales":[
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 1  Riesgos Psicosociales y Ausentismo Laboral en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 2  Riesgos Psicosociales y Ausentismo Laboral en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 2 Objetivo 1  Riesgos Psicosociales y Ausentismo Laboral en el año t"
+  ],
+  "Gasto":["Concentración del Gasto Subtítulos 22 + 29"],
+  "Género":["Medidas de Equidad de Género"],
+  "Transformación Digital":[
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 1  Transformación Digital en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 1 Objetivo 2  Transformación Digital en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 2 Objetivo 1  Transformación Digital en el año t",
+    "Requisitos técnicos cumplidos de la Etapa 3 Objetivo 1  Transformación Digital en el año t"
+  ]
+};
+
+function normalizeInd(s){ return String(s||"").trim().replace(/\\s+/g," "); }
+
+const IND_TO_SISTEMA = {};
+Object.entries(PMG_MAP).forEach(([sistema,inds])=>{
+  inds.forEach(i=>{ IND_TO_SISTEMA[normalizeInd(i)] = sistema; });
+});
+
+/* CUMPL_INVERTIDO_DET: solo en Tabla de indicadores (rowInd).
+   Gasto → Meta/Avance. Resto → Avance/Meta. */
+const CUMPL_INVERTIDO_DET = new Set([
+  normalizeInd("Concentración del Gasto Subtítulos 22 + 29")
+]);
+
+let CH={}, DT={};
+
+/* ══════════════════════════════════════════════
+   UTILIDADES
+══════════════════════════════════════════════ */
+function getComplianceColor(p, avance, meta){
+  const mt=Number(meta)||0;
+  if(mt===0) return "#28a745";
+  const pct=Number(p)||0;
+  return pct>=90?"#28a745":pct>=75?"#ffc107":"#dc3545";
+}
+function fmtRaw(v){
+  if(v===null||v===undefined||isNaN(Number(v))) return "—";
+  const n=Number(v);
+  const p=Math.abs(n)<=1.5?n*100:n;
+  return p.toLocaleString("es-CL",{minimumFractionDigits:2,maximumFractionDigits:2})+"%";
+}
+function fmtPct(v){
+  return (Number(v)||0).toLocaleString("es-CL",{minimumFractionDigits:2,maximumFractionDigits:2})+"%";
+}
+function fmtN(v){
+  return (Number(v)||0).toLocaleString("es-CL",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+/* Estándar: Avance / Meta × 100 */
+function calcCumpl(avance, meta){
+  const a=Number(avance)||0, m=Number(meta)||0;
+  if(m===0) return 0;
+  return (a/m)*100;
+}
+/* Invertida: Meta / Avance × 100 (Gasto en Tabla indicadores) */
+function calcCumplInv(avance, meta){
+  const a=Number(avance)||0, m=Number(meta)||0;
+  if(a===0) return 0;
+  return (m/a)*100;
+}
+function calcCumplDetalle(nom, avance, meta){
+  return CUMPL_INVERTIDO_DET.has(normalizeInd(nom))
+    ? calcCumplInv(avance, meta)
+    : calcCumpl(avance, meta);
+}
+function uniq(data,f){
+  const v=[...new Set(data.map(r=>r[f]).filter(x=>x!==null&&x!=""))];
+  if(f==="Mes") return v.sort((a,b)=>(MO[a]||99)-(MO[b]||99));
+  return v.sort((a,b)=>String(a).localeCompare(String(b),"es"));
+}
+function lastMes(data){
+  const m=uniq(data,"Mes"); return m.length?m[m.length-1]:"";
+}
+function fillSel(id,vals,addAll=false){
+  const s=document.getElementById(id); if(!s) return;
+  s.innerHTML=(addAll?'<option value="">Todos</option>':'<option value="">Seleccione</option>')+
+    vals.map(v=>`<option value="${v}">${v}</option>`).join("");
+}
+function fillSelVal(id,vals,selectedVal,addAll=false){
+  const s=document.getElementById(id); if(!s) return;
+  s.innerHTML=(addAll?'<option value="">Todos</option>':'')+
+    vals.map(v=>`<option value="${v}">${v}</option>`).join("");
+  if(selectedVal) s.value=selectedVal;
+}
+function groupBy(data,f){
+  const m={};
+  data.forEach(r=>{
+    const k=r[f]||"Sin dato";
+    if(!m[k]) m[k]={a:0,mt:0};
+    m[k].a +=Number(r["Contrib Cumpl Pond"]||0);
+    m[k].mt+=Number(r["Contrib Meta Pond"]||0);
+  });
+  return Object.entries(m)
+    .map(([k,v])=>({key:k,avance:v.a,meta:v.mt,cumpl:calcCumpl(v.a,v.mt)}))
+    .sort((a,b)=>b.cumpl-a.cumpl);
+}
+function groupByMIT(data,f){
+  const m={};
+  data.forEach(r=>{
+    const k=r[f]||"Sin dato";
+    if(!m[k]) m[k]={a:0,mt:0};
+    m[k].a +=Number(r["Contrib Cumpl Pond MIT"]||0);
+    m[k].mt+=Number(r["Contrib Meta Pond MIT"]||0);
+  });
+  return Object.entries(m)
+    .map(([k,v])=>({key:k,avance:v.a,meta:v.mt,cumpl:calcCumpl(v.a,v.mt)}))
+    .sort((a,b)=>b.cumpl-a.cumpl);
+}
+function progBar(p,avance,meta){
+  const col=getComplianceColor(p,avance,meta);
+  return `<div class="prog-wrap">
+    <div class="prog-outer"><div class="prog-inner" style="width:${Math.min(100,Math.max(0,p)).toFixed(2)}%;background:${col};"></div></div>
+    <span class="prog-lbl" style="color:${col};">${fmtPct(p)}</span>
+  </div>`;
+}
+function rowInd(r){
+  const av=Number(r["Avance efectivo"]||0);
+  const mt=Number(r["Meta periodo"]||0);
+  const nom=normalizeInd(r["Nombre Indicador"]);
+  const cp=calcCumplDetalle(nom,av,mt);
+  const col=getComplianceColor(cp,av,mt);
+  return `<tr>
+    <td>${nom}</td><td>${fmtRaw(mt)}</td><td>${fmtN(r["Numerador"])}</td>
+    <td>${fmtN(r["Denominador"])}</td><td>${fmtRaw(av)}</td>
+    <td style="color:${col};font-weight:700;">${fmtPct(cp)}</td>
+  </tr>`;
+}
+function rowIndStd(r){
+  const av=Number(r["Avance efectivo"]||0);
+  const mt=Number(r["Meta periodo"]||0);
+  const cp=calcCumpl(av,mt);
+  const col=getComplianceColor(cp,av,mt);
+  return `<tr>
+    <td>${normalizeInd(r["Nombre Indicador"])}</td><td>${fmtRaw(mt)}</td>
+    <td>${fmtN(r["Numerador"])}</td><td>${fmtN(r["Denominador"])}</td>
+    <td>${fmtRaw(av)}</td><td style="color:${col};font-weight:700;">${fmtPct(cp)}</td>
+  </tr>`;
+}
+function rebuildDT(id,rows){
+  if(DT[id]){DT[id].destroy();delete DT[id];}
+  const tbody=document.querySelector("#"+id+" tbody");
+  if(!tbody) return;
+  tbody.innerHTML=rows;
+  DT[id]=$("#"+id).DataTable({
+    paging:false,info:false,lengthChange:false,order:[],
+    language:{url:"https://cdn.datatables.net/plug-ins/1.13.8/i18n/es-ES.json"}
+  });
+}
+function mkChart(id,cfg){
+  if(CH[id]){CH[id].destroy();delete CH[id];}
+  const el=document.getElementById(id); if(!el) return;
+  CH[id]=new Chart(el.getContext("2d"),cfg);
+}
+function trendCfg(meses,bm){
+  return {type:"line",data:{labels:meses,datasets:[
+    {label:"Avance efectivo",data:meses.map(m=>+(bm[m].a*100).toFixed(4)),
+      borderColor:"#2563eb",backgroundColor:"rgba(37,99,235,.1)",tension:.35,fill:true,datalabels:{display:false}},
+    {label:"Meta período",data:meses.map(m=>+(bm[m].mt*100).toFixed(4)),
+      borderColor:"#7c3aed",backgroundColor:"rgba(124,58,237,.05)",tension:.35,borderDash:[6,4],datalabels:{display:false}},
+    {label:"Cumplimiento",data:meses.map(m=>+calcCumpl(bm[m].a,bm[m].mt).toFixed(4)),
+      borderColor:"#f97316",backgroundColor:"rgba(249,115,22,.08)",tension:.35,
+      datalabels:{display:true,align:"top",anchor:"top",color:"#f97316",font:{weight:"bold",size:11},
+        formatter:v=>v.toLocaleString("es-CL",{minimumFractionDigits:2,maximumFractionDigits:2})+"%"}}
+  ]},options:{responsive:true,layout:{padding:{top:28}},
+    plugins:{legend:{position:"top"},
+      tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.parsed.y.toFixed(2).replace(".",",")}%`}},
+      datalabels:{}},
+    scales:{y:{ticks:{callback:v=>v+"%"}}}}};
+}
+
+/* ══════════════════════════════════════════════
+   S1: RESUMEN PMG
+══════════════════════════════════════════════ */
+function renderS1kpis(){
+  const mes=String(document.getElementById("s1-mes").value||"").trim();
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Programa de Mejoramiento de la Gestión");
+  if(mes) d=d.filter(r=>String(r["Mes"]||"").trim()===mes);
+  const tA=d.reduce((s,r)=>s+Number(r["Contrib Cumpl Pond"]||0),0);
+  const tM=d.reduce((s,r)=>s+Number(r["Contrib Meta Pond"]||0),0);
+  const tC=calcCumpl(tA,tM);
+  document.getElementById("kpi-av").textContent=fmtPct(tA*100);
+  document.getElementById("kpi-mt").textContent=fmtPct(tM*100);
+  document.getElementById("kpi-cu").textContent=fmtPct(tC);
+  document.getElementById("kpi-cu").style.color=getComplianceColor(tC,tA,tM);
+}
+function renderS1SisTable(){
+  const mes=String(document.getElementById("s1-mes").value||"").trim();
+  let base=ALL.filter(r=>r["Instrumento de gestión"]==="Programa de Mejoramiento de la Gestión");
+  if(mes) base=base.filter(r=>String(r["Mes"]||"").trim()===mes);
+  const rows=Object.entries(PMG_MAP).map(([sistema,inds])=>{
+    const indSet=new Set(inds.map(normalizeInd));
+    const filas=base.filter(r=>indSet.has(normalizeInd(r["Nombre Indicador"])));
+    const av=filas.reduce((s,r)=>s+Number(r["Contrib Cumpl Pond"]||0),0);
+    const mt=filas.reduce((s,r)=>s+Number(r["Contrib Meta Pond"]||0),0);
+    const cp=calcCumpl(av,mt);
+    const col=getComplianceColor(cp,av,mt);
+    return `<tr>
+      <td><strong>${sistema}</strong></td>
+      <td>${fmtPct(av*100)}</td>
+      <td>${fmtPct(mt*100)}</td>
+      <td style="color:${col};font-weight:700;">${fmtPct(cp)}</td>
+    </tr>`;
+  }).join("");
+  rebuildDT("t-pmg-sis",rows);
+}
+function renderS1tabla(){
+  const mes=String(document.getElementById("s1-mes").value||"").trim();
+  const sis=String(document.getElementById("s1-sis").value||"").trim();
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Programa de Mejoramiento de la Gestión");
+  if(mes) d=d.filter(r=>String(r["Mes"]||"").trim()===mes);
+  if(sis) d=d.filter(r=>IND_TO_SISTEMA[normalizeInd(r["Nombre Indicador"])]===sis);
+  rebuildDT("t-pmg",d.map(rowInd).join(""));
+}
+
+/* ══════════════════════════════════════════════
+   S2: RESUMEN CDC
+══════════════════════════════════════════════ */
+function renderS2(){
+  const mes=document.getElementById("s2-mes").value;
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Convenio de Desempeño Colectivo");
+  if(mes) d=d.filter(r=>r["Mes"]===mes);
+  const fill=(tid,ub)=>{
+    const rows=groupBy(d.filter(r=>r["Ubicación"]===ub),"Equipo");
+    document.querySelector("#"+tid+" tbody").innerHTML=rows.map(r=>
+      `<tr><td>${r.key}</td><td>${fmtRaw(r.avance)}</td><td>${fmtRaw(r.meta)}</td>
+           <td>${progBar(r.cumpl,r.avance,r.meta)}</td></tr>`).join("");
+  };
+  fill("t-seremi","Seremi");
+  fill("t-central","Nivel Central");
+}
+
+/* ══════════════════════════════════════════════
+   S3: CDC POR EQUIPO
+══════════════════════════════════════════════ */
+function renderS3tend(){
+  const eq=document.getElementById("s3-equipo").value;
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Convenio de Desempeño Colectivo");
+  if(eq) d=d.filter(r=>r["Equipo"]===eq);
+  const bm={};
+  d.forEach(r=>{const m=r["Mes"];if(!bm[m])bm[m]={a:0,mt:0};
+    bm[m].a+=Number(r["Contrib Cumpl Pond"]||0);
+    bm[m].mt+=Number(r["Contrib Meta Pond"]||0);});
+  const meses=Object.keys(bm).sort((a,b)=>(MO[a]||99)-(MO[b]||99));
+  mkChart("ch-tend",trendCfg(meses,bm));
+}
+function renderS3tabla(){
+  const eq=document.getElementById("s3-equipo").value;
+  const mes=document.getElementById("s3-mes").value;
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Convenio de Desempeño Colectivo");
+  if(mes) d=d.filter(r=>r["Mes"]===mes);
+  if(eq)  d=d.filter(r=>r["Equipo"]===eq);
+  rebuildDT("t-cdc2",d.map(rowInd).join(""));
+}
+
+/* ══════════════════════════════════════════════
+   S4: RESUMEN MIT (solo SEREMI)
+══════════════════════════════════════════════ */
+function renderS4(){
+  const mes=document.getElementById("s4-mes").value;
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Matriz de Indicadores Transversales"
+                   && r["Ubicación"]==="Seremi");
+  if(mes) d=d.filter(r=>r["Mes"]===mes);
+  const rows=groupByMIT(d,"Equipo");
+  document.querySelector("#t-mit-seremi tbody").innerHTML=rows.map(r=>
+    `<tr><td>${r.key}</td><td>${fmtRaw(r.avance)}</td><td>${fmtRaw(r.meta)}</td>
+         <td>${progBar(r.cumpl,r.avance,r.meta)}</td></tr>`).join("");
+}
+
+/* ══════════════════════════════════════════════
+   S5: MIT POR EQUIPO (solo SEREMI)
+══════════════════════════════════════════════ */
+function renderS5tend(){
+  const eq=document.getElementById("s5-equipo").value;
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Matriz de Indicadores Transversales"
+                   && r["Ubicación"]==="Seremi");
+  if(eq) d=d.filter(r=>r["Equipo"]===eq);
+  const bm={};
+  d.forEach(r=>{
+    const m=r["Mes"]; if(!bm[m])bm[m]={a:0,mt:0};
+    bm[m].a +=Number(r["Contrib Cumpl Pond MIT"]||0);
+    bm[m].mt+=Number(r["Contrib Meta Pond MIT"]||0);
+  });
+  const meses=Object.keys(bm).sort((a,b)=>(MO[a]||99)-(MO[b]||99));
+  mkChart("ch-mit-tend",trendCfg(meses,bm));
+}
+function renderS5tabla(){
+  const eq=document.getElementById("s5-equipo").value;
+  const mes=document.getElementById("s5-mes").value;
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Matriz de Indicadores Transversales"
+                   && r["Ubicación"]==="Seremi");
+  if(mes) d=d.filter(r=>r["Mes"]===mes);
+  if(eq)  d=d.filter(r=>r["Equipo"]===eq);
+  const rows=d.map(r=>{
+    const avEf=Number(r["Avance efectivo"]||0);
+    const mtP=Number(r["Meta periodo"]||0);
+    const cp=calcCumpl(avEf,mtP);
+    const col=getComplianceColor(cp,avEf,mtP);
+    return `<tr>
+      <td>${normalizeInd(r["Nombre Indicador"])}</td><td>${fmtRaw(mtP)}</td>
+      <td>${fmtN(r["Numerador"])}</td><td>${fmtN(r["Denominador"])}</td>
+      <td>${fmtRaw(avEf)}</td><td style="color:${col};font-weight:700;">${fmtPct(cp)}</td>
+    </tr>`;
+  }).join("");
+  rebuildDT("t-mit2",rows);
+}
+
+/* ══════════════════════════════════════════════
+   S6: RESUMEN FH
+   KPIs → solo filtro Mes | Tabla → Mes + Equipo
+══════════════════════════════════════════════ */
+function renderS6kpis(){
+  const mes=String(document.getElementById("s6-mes").value||"").trim();
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Formulario H");
+  if(mes) d=d.filter(r=>String(r["Mes"]||"").trim()===mes);
+  const tA=d.reduce((s,r)=>s+Number(r["Contrib Cumpl Pond"]||0),0);
+  const tM=d.reduce((s,r)=>s+Number(r["Contrib Meta Pond"]||0),0);
+  const tC=calcCumpl(tA,tM);
+  document.getElementById("fh-kpi-av").textContent=fmtPct(tA*100);
+  document.getElementById("fh-kpi-mt").textContent=fmtPct(tM*100);
+  document.getElementById("fh-kpi-cu").textContent=fmtPct(tC);
+  document.getElementById("fh-kpi-cu").style.color=getComplianceColor(tC,tA,tM);
+}
+function renderS6tabla(){
+  const mes=String(document.getElementById("s6-mes").value||"").trim();
+  const eq=String(document.getElementById("s6-equipo").value||"").trim();
+  let d=ALL.filter(r=>r["Instrumento de gestión"]==="Formulario H");
+  if(mes) d=d.filter(r=>String(r["Mes"]||"").trim()===mes);
+  if(eq)  d=d.filter(r=>r["Equipo"]===eq);
+  rebuildDT("t-fh",d.map(rowIndStd).join(""));
+}
+function renderS6(){
+  renderS6kpis();
+  renderS6tabla();
+}
+
+/* ══════════════════════════════════════════════
+   S7: RESUMEN PROGRAMAS
+══════════════════════════════════════════════ */
+function renderS7(){
+  const mes=document.getElementById("s7-mes").value;
+  const prog=document.getElementById("s7-prog").value;
+  const equipo=document.getElementById("s7-equipo").value;
+  let d=ALL.filter(r=>PROG_OK.has(r["Instrumento de gestión"]));
+  if(mes)    d=d.filter(r=>r["Mes"]===mes);
+  if(prog)   d=d.filter(r=>r["Instrumento de gestión"]===prog);
+  if(equipo) d=d.filter(r=>r["Equipo"]===equipo);
+  const rk=groupBy(d,"Instrumento de gestión");
+  mkChart("ch-prog",{type:"bar",
+    data:{labels:rk.map(r=>r.key.replace("Programa ","")),
+      datasets:[{label:"Cumplimiento",data:rk.map(r=>+r.cumpl.toFixed(4)),
+        backgroundColor:rk.map(r=>getComplianceColor(r.cumpl,r.avance,r.meta)),
+        datalabels:{display:true,anchor:"end",align:"right",
+          color:ctx=>getComplianceColor(ctx.dataset.data[ctx.dataIndex],rk[ctx.dataIndex].avance,rk[ctx.dataIndex].meta),
+          font:{weight:"bold",size:11},
+          formatter:v=>v.toLocaleString("es-CL",{minimumFractionDigits:2,maximumFractionDigits:2})+"%"}}]},
+    options:{indexAxis:"y",layout:{padding:{right:65}},
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{title:i=>rk[i[0].dataIndex].key,
+          label:c=>[`Cumplimiento: ${c.parsed.x.toFixed(2).replace(".",",")}%`,
+                    `Avance efectivo: ${fmtRaw(rk[c.dataIndex].avance)}`,
+                    `Meta período: ${fmtRaw(rk[c.dataIndex].meta)}`]}},datalabels:{}},
+      scales:{x:{max:110,ticks:{callback:v=>v+"%"}}}}});
+  rebuildDT("t-prog",d.map(rowInd).join(""));
+}
+
+/* ── Modo oscuro ── */
+function toggleDark(){
+  const h=document.documentElement,nxt=h.getAttribute("data-bs-theme")==="dark"?"light":"dark";
+  h.setAttribute("data-bs-theme",nxt);localStorage.setItem("pgi_theme",nxt);
+  document.getElementById("darkLbl").textContent=nxt==="dark"?"Modo claro":"Modo oscuro";
+  document.querySelector("#btnDark i").className=nxt==="dark"?"fa-solid fa-sun me-1":"fa-solid fa-moon me-1";
+}
+function loadTheme(){if(localStorage.getItem("pgi_theme")==="dark")toggleDark();}
+
+/* ── PDF ── */
+async function exportPDF(){
+  const{jsPDF}=window.jspdf;
+  const sel=[...document.querySelectorAll(".pdf-chk:checked")].map(c=>c.value);
+  if(!sel.length){alert("Selecciona al menos una sección.");return;}
+  const btn=document.getElementById("btn-pdf");
+  btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin me-1"></i>Generando…';
+  const pdf=new jsPDF("p","mm","a4");const ts=new Date().toLocaleString("es-CL");let first=true;
+  for(const id of sel){const el=document.getElementById(id);if(!el)continue;
+    if(!first)pdf.addPage();first=false;
+    pdf.setFontSize(9);pdf.setTextColor(100);
+    pdf.text("Panel de Gestión Institucional 2026 — "+ts,10,8);
+    const cv=await html2canvas(el,{scale:2,useCORS:true,
+      backgroundColor:document.documentElement.getAttribute("data-bs-theme")==="dark"?"#0f172a":"#fff"});
+    const iW=190,iH=Math.min((cv.height*iW)/cv.width,270);
+    pdf.addImage(cv.toDataURL("image/png"),"PNG",10,12,iW,iH);
+  }
+  pdf.save("panel_gestion_2026.pdf");
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-download me-1"></i>Descargar PDF';
+  bootstrap.Modal.getInstance(document.getElementById("m-pdf")).hide();
+}
+
+/* ── Inicialización de filtros ── */
+function initFilters(){
+  const cdc =ALL.filter(r=>r["Instrumento de gestión"]==="Convenio de Desempeño Colectivo");
+  const prg =ALL.filter(r=>PROG_OK.has(r["Instrumento de gestión"]));
+  const pmg =ALL.filter(r=>r["Instrumento de gestión"]==="Programa de Mejoramiento de la Gestión");
+  const fh  =ALL.filter(r=>r["Instrumento de gestión"]==="Formulario H");
+  const mitSer=ALL.filter(r=>r["Instrumento de gestión"]==="Matriz de Indicadores Transversales"
+                           && r["Ubicación"]==="Seremi");
+
+  /* S1 — PMG */
+  fillSelVal("s1-mes",uniq(pmg,"Mes"),lastMes(pmg));
+  document.getElementById("s1-sis").innerHTML='<option value="">Todos</option>'+
+    Object.keys(PMG_MAP).map(k=>`<option value="${k}">${k}</option>`).join("");
+
+  /* S2 — CDC resumen */
+  fillSelVal("s2-mes",uniq(cdc,"Mes"),lastMes(cdc));
+
+  /* S3 — CDC por equipo */
+  fillSelVal("s3-mes",uniq(cdc,"Mes"),lastMes(cdc));
+  const equiposCdc=uniq(cdc,"Equipo");
+  fillSelVal("s3-equipo",equiposCdc,equiposCdc[0]||"");
+
+  /* S4 — MIT resumen */
+  fillSelVal("s4-mes",uniq(mitSer,"Mes"),lastMes(mitSer));
+
+  /* S5 — MIT por equipo */
+  fillSelVal("s5-mes",uniq(mitSer,"Mes"),lastMes(mitSer));
+  const equiposMitSer=uniq(mitSer,"Equipo");
+  fillSelVal("s5-equipo",equiposMitSer,equiposMitSer[0]||"");
+
+  /* S6 — FH */
+  fillSelVal("s6-mes",uniq(fh,"Mes"),lastMes(fh));
+  fillSel("s6-equipo",uniq(fh,"Equipo"),true);
+
+  /* S7 — Programas */
+  fillSelVal("s7-mes",uniq(prg,"Mes"),lastMes(prg));
+  fillSel("s7-prog",uniq(prg,"Instrumento de gestión"),true);
+  fillSel("s7-equipo",uniq(prg,"Equipo"),true);
+}
+
+/* ── Eventos ── */
+function bindEvents(){
+  /* S1 PMG */
+  document.getElementById("s1-mes").addEventListener("change",()=>{
+    renderS1kpis(); renderS1SisTable(); renderS1tabla();
+  });
+  document.getElementById("s1-sis").addEventListener("change",renderS1tabla);
+
+  /* S2 CDC resumen */
+  document.getElementById("s2-mes").addEventListener("change",renderS2);
+
+  /* S3 CDC por equipo */
+  document.getElementById("s3-equipo").addEventListener("change",()=>{renderS3tend();renderS3tabla();});
+  document.getElementById("s3-mes").addEventListener("change",renderS3tabla);
+
+  /* S4 MIT resumen */
+  document.getElementById("s4-mes").addEventListener("change",renderS4);
+
+  /* S5 MIT por equipo */
+  document.getElementById("s5-equipo").addEventListener("change",()=>{renderS5tend();renderS5tabla();});
+  document.getElementById("s5-mes").addEventListener("change",renderS5tabla);
+
+  /* S6 FH */
+  document.getElementById("s6-mes").addEventListener("change",renderS6);
+  document.getElementById("s6-equipo").addEventListener("change",renderS6tabla);
+
+  /* S7 Programas */
+  ["s7-mes","s7-prog","s7-equipo"].forEach(id=>
+    document.getElementById(id).addEventListener("change",renderS7));
+
+  document.getElementById("btnDark").addEventListener("click",toggleDark);
+  document.getElementById("btnPDF").addEventListener("click",()=>{
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("m-pdf")).show();});
+  document.getElementById("btn-pdf").addEventListener("click",exportPDF);
+
+  document.querySelectorAll(".sidebar a").forEach(a=>{
+    a.addEventListener("click",function(e){
+      e.preventDefault();
+      document.querySelectorAll(".sidebar a").forEach(x=>x.classList.remove("active"));
+      this.classList.add("active");
+      const t=document.querySelector(this.getAttribute("href"));
+      if(t) t.scrollIntoView({behavior:"smooth"});
+    });
+  });
+}
+
+/* ── DOMContentLoaded ── */
+document.addEventListener("DOMContentLoaded",()=>{
+  loadTheme();
+  initFilters();
+  bindEvents();
+  renderS1kpis(); renderS1SisTable(); renderS1tabla();
+  renderS2();
+  renderS3tend(); renderS3tabla();
+  renderS4();
+  renderS5tend(); renderS5tabla();
+  renderS6();
+  renderS7();
+});
+</script>
+</body>
+</html>"""
+
+
+def open_browser(path):
+    uri = Path(path).resolve().as_uri()
+    webbrowser.open(uri)
+    print(f"  ✓ Abriendo: {uri}")
+
+def main():
+    print("\n╔════════════════════════════════════════╗")
+    print("║  Generador — Panel Gestión 2026 v4.10  ║")
+    print("╚════════════════════════════════════════╝\n")
+    try:
+        df       = read_excel(EXCEL_PATH)
+        validate_columns(df)
+        df       = clean_and_transform(df)
+        logo_uri = encode_logo(LOGO_PATH)
+        generate_html(df, logo_uri, OUTPUT_PATH)
+        open_browser(OUTPUT_PATH)
+        print("\n✅  Listo.\n")
+    except Exception as e:
+        print(f"\n❌  ERROR: {e}\n")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
