@@ -60,6 +60,10 @@ button{font:inherit; color:inherit}
 .menu-alt{margin-left:auto; width:2rem; height:2rem; border:0; border-radius:var(--radius-s); background:none;
   color:var(--primario-darken-1); display:grid; place-items:center; cursor:pointer; flex:none}
 .menu-alt:hover{background:var(--secundario-base)}
+.menu-pie{margin-top:auto; padding:1.5rem 1.375rem 0; border-top:1px solid var(--gris-10)}
+.menu-pie a{display:flex; align-items:center; gap:0.875rem; padding:0.25rem 0; font-size:0.9375rem; color:var(--gris-60); text-decoration:none; white-space:nowrap}
+.menu-pie a:hover{color:var(--primario-darken-1)}
+.menu-pie i{width:22px; flex:none; text-align:center; font-size:1.125rem}
 .pag{display:flex; align-items:center; gap:.875rem; width:100%; padding:.875rem 1.375rem; border:0; border-left:.25rem solid transparent;
   background:none; font-size:1.0625rem; text-align:left; white-space:nowrap; cursor:pointer}
 .pag:hover{background:var(--gris-5)}
@@ -160,6 +164,7 @@ html.captura,.captura body{height:auto}
   .cuerpo{flex-direction:column}
   .menu{width:auto; flex-direction:row; padding:0; border-right:0; border-bottom:1px solid var(--gris-10); overflow-x:auto}
   .app.cerrado .menu{width:auto}
+.menu-pie{display:none}
   .app.cerrado .txt{display:inline}
   .menu-cab{display:none}
   .pag{width:auto; justify-content:center; padding:.75rem; border-left:0; border-bottom:3px solid transparent; font-size:.9375rem}
@@ -204,6 +209,7 @@ html.captura,.captura body{height:auto}
     <button type="button" class="pag" data-pag="s5" title="MIT por Equipo"><i class="fa-solid fa-user-check"></i><span class="txt">MIT por Equipo</span></button>
     <button type="button" class="pag" data-pag="s6" title="Resumen FH"><i class="fa-solid fa-file-lines"></i><span class="txt">Resumen FH</span></button>
     <button type="button" class="pag" data-pag="s7" title="Resumen Programas"><i class="fa-solid fa-layer-group"></i><span class="txt">Resumen Programas</span></button>
+<div class="menu-pie"><a href="https://lab-reportes.bienes.cl/" target="_top" title="Ir al Centro de Paneles"><i class="fa-solid fa-house"></i><span class="txt">Centro de Paneles</span></a></div>
   </nav>
 
   <main class="contenido">
