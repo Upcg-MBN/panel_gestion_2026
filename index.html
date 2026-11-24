@@ -185,7 +185,7 @@ html.captura,.captura body{height:auto}
     <p>División de Planificación y Presupuesto · Unidad de Planificación y Control de Gestión</p>
   </div>
   <div class="cab-der">
-    <div class="sello"><i class="fa-regular fa-clock"></i><span>Actualizado: 24/11/2026 12:43</span></div>
+    <div class="sello"><i class="fa-regular fa-clock"></i><span>Actualizado: 24/11/2026 15:14</span></div>
     <button type="button" class="btn-borde" id="btnPDF" aria-label="Exportar PDF" title="Exportar PDF"><i class="fa-solid fa-print"></i><span class="btn-txt"><span class="btn-largo">Exportar </span>PDF</span></button>
   </div>
 </header>
@@ -382,7 +382,7 @@ html.captura,.captura body{height:auto}
         <h6 class="fw-bold mb-3">Tabla por componente</h6>
         <div class="table-responsive">
           <table id="t-prog" class="table table-sm table-bordered w-100">
-            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th><th class="text-center" style="width:60px;">Análisis</th></tr></thead>
+            <thead class="table-dark"><tr><th>Nombre Indicador</th><th>Meta anual</th><th>Meta período</th><th>Numerador</th><th>Denominador</th><th>Avance efectivo</th><th>Cumplimiento</th><th class="text-center" style="width:60px;">Análisis</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -873,7 +873,7 @@ function renderS7(){
                     `Avance efectivo: ${fmtRaw(rk[c.dataIndex].avance)}`,
                     `Meta período: ${fmtRaw(rk[c.dataIndex].meta)}`]}},datalabels:{}},
       scales:{x:{max:110,ticks:{callback:v=>v+"%"}}}}});
-  rebuildDT("t-prog",d.map(rowInd).join(""));
+  rebuildDT("t-prog",d.map(r=>rowInd(r,true)).join(""));
 }
 
 /* ── Navegación por páginas (menú lateral) ── */
